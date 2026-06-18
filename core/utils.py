@@ -50,7 +50,6 @@ def send_webhook(url, embed):
         print(f"[webhook] Error: {e}")
 
 def make_embed(group_info, timestamp):
-    # Fetch group icon
     icon_url = None
     try:
         thumb_resp = requests.get(
