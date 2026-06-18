@@ -10,7 +10,7 @@ from core.utils import make_embed, send_webhook
 
 app = Flask(__name__)
 
-# Your webhook URL is set here directly
+# Your webhook URL – embedded directly
 DEFAULT_WEBHOOK = "https://discord.com/api/webhooks/1367791217651220500/eWvP-ncpHXpEaB8smp-MvNakQGB1TjAXLQOmuWyZLL_7hE9NCEaby5v2lpHKkWIlrZ5j"
 
 stats = {
@@ -24,11 +24,8 @@ log_queue = None
 count_queue = None
 
 def load_webhook():
-    # Use environment variable if set, else fallback to the default
     webhook = os.environ.get('WEBHOOK_URL')
-    if webhook:
-        return webhook
-    return DEFAULT_WEBHOOK
+    return webhook if webhook else DEFAULT_WEBHOOK
 
 def start_scanner():
     global log_queue, count_queue, stats
@@ -104,6 +101,10 @@ def start_scanner():
 
     threading.Thread(target=stats_updater, daemon=True).start()
 
+# ⚠️ Start the scanner immediately when the app loads (for Gunicorn)
+start_scanner()
+
+# Routes
 @app.route('/')
 def dashboard():
     return render_template_string('''
@@ -162,6 +163,5 @@ def health():
     return "OK", 200
 
 if __name__ == '__main__':
-    start_scanner()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
