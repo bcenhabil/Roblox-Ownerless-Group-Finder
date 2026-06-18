@@ -2,16 +2,15 @@ import json
 import time
 import threading
 import sys
+import os
 from flask import Flask, jsonify, render_template_string
 from core.threads.group_scanner import group_scanner
-from core.threads.log_processor import log_processor
 from core.proxy_manager import ProxyManager
 from core.constants import DEFAULT_RANGES
-import os
+from core.utils import make_embed, send_webhook
 
 app = Flask(__name__)
 
-# Global stats
 stats = {
     'scanned': 0,
     'found': 0,
@@ -19,12 +18,10 @@ stats = {
     'status': 'Idle'
 }
 
-# Queues
 log_queue = None
 count_queue = None
 
-def load_config():
-    # Use environment variables if present, else fallback to config.json
+def load_webhook():
     webhook_url = os.environ.get('WEBHOOK_URL', '')
     if not webhook_url:
         try:
@@ -37,24 +34,23 @@ def load_config():
 
 def start_scanner():
     global log_queue, count_queue, stats
-    webhook_url = load_config()
+    webhook_url = load_webhook()
     if not webhook_url:
         print("[ERROR] WEBHOOK_URL environment variable or config.json is required")
+        stats['status'] = 'Error: No webhook'
         return
 
+    print("[INFO] Webhook URL loaded, starting scanner...")
     log_queue = threading.Queue()
     count_queue = threading.Queue()
 
-    # Start log processor (webhook sender) – just prints to console for now, but also keeps queue
+    # Log processor (sends webhooks and updates stats)
     def log_worker():
         while True:
             try:
                 timestamp, group_info = log_queue.get(timeout=1)
-                # Send to Discord via webhook
-                from core.utils import make_embed, send_webhook
                 embed = make_embed(group_info, timestamp)
                 send_webhook(webhook_url, embed)
-                # Update stats
                 stats['found'] += 1
                 stats['recent'].insert(0, {
                     'id': group_info['id'],
@@ -64,44 +60,46 @@ def start_scanner():
                 })
                 if len(stats['recent']) > 50:
                     stats['recent'] = stats['recent'][:50]
+                print(f"[FOUND] {group_info['name']} (ID: {group_info['id']})")
             except:
                 time.sleep(0.1)
 
     threading.Thread(target=log_worker, daemon=True).start()
 
-    # Proxy manager (auto-fetch proxies)
+    # Proxy manager
     proxy_manager = ProxyManager()
 
-    # Scanner (single-threaded, but uses its own internal threads)
+    # Scanner – now uses ALL DEFAULT_RANGES
     def scanner_worker():
-        ranges = DEFAULT_RANGES  # or from config
-        stats['status'] = 'Scanning'
         try:
-            # We'll run the scanner in a loop; group_scanner will loop through all IDs
-            # We need a version that runs indefinitely and updates stats
-            # We'll use a modified scanner that updates count_queue
-            from core.threads.group_scanner import group_scanner
-            group_scanner(log_queue, count_queue, proxy_manager, 10, ranges, 5)  # chunk size 5 to reduce memory
-        except Exception as e:
-            print(f"Scanner error: {e}")
-        finally:
+            stats['status'] = 'Starting...'
+            print("[INFO] Scanner thread started")
+            # Use all default ranges
+            ranges = DEFAULT_RANGES
+            print(f"[INFO] Scanning ranges: {ranges}")
+            stats['status'] = 'Scanning'
+            group_scanner(log_queue, count_queue, proxy_manager, 10, ranges, 10)
             stats['status'] = 'Stopped'
+        except Exception as e:
+            print(f"[ERROR] Scanner crashed: {e}")
+            stats['status'] = f'Error: {str(e)[:50]}'
 
     threading.Thread(target=scanner_worker, daemon=True).start()
 
-    # Update stats from count_queue
+    # Stats updater
     def stats_updater():
         while True:
             try:
                 cnt = count_queue.get_nowait()
                 stats['scanned'] += cnt
+                if stats['scanned'] % 100 == 0:
+                    print(f"[STATS] Scanned {stats['scanned']} groups so far")
             except:
                 pass
             time.sleep(0.5)
 
     threading.Thread(target=stats_updater, daemon=True).start()
 
-# Dashboard route
 @app.route('/')
 def dashboard():
     return render_template_string('''
@@ -121,6 +119,7 @@ def dashboard():
                 .green { color: #4caf50; }
                 .blue { color: #42a5f5; }
                 .orange { color: #ffa726; }
+                .red { color: #ef5350; }
                 table { width: 100%; border-collapse: collapse; margin-top: 20px; }
                 th, td { padding: 12px; text-align: left; border-bottom: 1px solid #333; }
                 th { background: #0f3460; }
@@ -130,7 +129,7 @@ def dashboard():
         <body>
             <h1>🔍 Roblox Ownerless Group Finder</h1>
             <div class="card">
-                <div class="stat"><span class="stat-label">Status</span><br><span class="stat-value blue">{{ stats.status }}</span></div>
+                <div class="stat"><span class="stat-label">Status</span><br><span class="stat-value {% if stats.status == 'Scanning' %}green{% elif stats.status == 'Error' %}red{% else %}blue{% endif %}">{{ stats.status }}</span></div>
                 <div class="stat"><span class="stat-label">Scanned</span><br><span class="stat-value orange">{{ stats.scanned }}</span></div>
                 <div class="stat"><span class="stat-label">Found</span><br><span class="stat-value green">{{ stats.found }}</span></div>
             </div>
@@ -155,9 +154,11 @@ def dashboard():
 def stats_json():
     return jsonify(stats)
 
+@app.route('/health')
+def health():
+    return "OK", 200
+
 if __name__ == '__main__':
-    # Start scanner in background
     start_scanner()
-    # Run Flask
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
