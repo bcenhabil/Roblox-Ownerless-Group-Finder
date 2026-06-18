@@ -1,7 +1,6 @@
 import json
 import time
 import threading
-import sys
 import os
 from flask import Flask, jsonify, render_template_string
 from core.threads.group_scanner import group_scanner
@@ -10,6 +9,9 @@ from core.constants import DEFAULT_RANGES
 from core.utils import make_embed, send_webhook
 
 app = Flask(__name__)
+
+# Your webhook URL is set here directly
+DEFAULT_WEBHOOK = "https://discord.com/api/webhooks/1367791217651220500/eWvP-ncpHXpEaB8smp-MvNakQGB1TjAXLQOmuWyZLL_7hE9NCEaby5v2lpHKkWIlrZ5j"
 
 stats = {
     'scanned': 0,
@@ -22,30 +24,25 @@ log_queue = None
 count_queue = None
 
 def load_webhook():
-    webhook_url = os.environ.get('WEBHOOK_URL', '')
-    if not webhook_url:
-        try:
-            with open('config.json', 'r') as f:
-                config = json.load(f)
-                webhook_url = config.get('webhook_url', '')
-        except Exception as e:
-            print(f"[ERROR] Could not read config.json: {e}")
-    return webhook_url
+    # Use environment variable if set, else fallback to the default
+    webhook = os.environ.get('WEBHOOK_URL')
+    if webhook:
+        return webhook
+    return DEFAULT_WEBHOOK
 
 def start_scanner():
     global log_queue, count_queue, stats
     webhook_url = load_webhook()
     if not webhook_url:
-        print("[ERROR] WEBHOOK_URL environment variable or config.json is required")
+        print("[ERROR] No webhook URL available")
         stats['status'] = 'Error: No webhook'
-        # Keep the app running – don't exit
         return
 
-    print("[INFO] Webhook URL loaded, starting scanner...")
+    print(f"[INFO] Using webhook: {webhook_url[:50]}...")
     log_queue = threading.Queue()
     count_queue = threading.Queue()
 
-    # Log processor (sends webhooks and updates stats)
+    # Log processor
     def log_worker():
         while True:
             try:
@@ -62,8 +59,7 @@ def start_scanner():
                 if len(stats['recent']) > 50:
                     stats['recent'] = stats['recent'][:50]
                 print(f"[FOUND] {group_info['name']} (ID: {group_info['id']})")
-            except Exception as e:
-                print(f"[log_worker] Error: {e}")
+            except:
                 time.sleep(0.1)
 
     threading.Thread(target=log_worker, daemon=True).start()
@@ -71,12 +67,12 @@ def start_scanner():
     # Proxy manager
     try:
         proxy_manager = ProxyManager()
-        print("[INFO] ProxyManager initialized")
+        print("[INFO] ProxyManager started")
     except Exception as e:
-        print(f"[ERROR] ProxyManager failed: {e}")
+        print(f"[ERROR] ProxyManager: {e}")
         proxy_manager = None
 
-    # Scanner – uses ALL DEFAULT_RANGES
+    # Scanner
     def scanner_worker():
         try:
             stats['status'] = 'Starting...'
