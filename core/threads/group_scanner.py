@@ -8,8 +8,7 @@ import time
 GROUP_API = "groups.roblox.com"
 GROUP_API_ADDR = (socket.gethostbyname(GROUP_API), 443)
 
-def group_scanner(log_queue, count_queue, proxy_manager, timeout, gid_ranges, chunk_size=5):
-    # Generate IDs on the fly (no huge list)
+def group_scanner(log_queue, count_queue, proxy_manager, timeout, gid_ranges, chunk_size=10):
     def id_generator(ranges):
         for start, end in ranges:
             for gid in range(start, end):
@@ -29,11 +28,7 @@ def group_scanner(log_queue, count_queue, proxy_manager, timeout, gid_ranges, ch
         if not chunk:
             break
 
-        # Get proxy
-        if proxy_manager:
-            proxy_auth, proxy_addr = proxy_manager.get_proxy()
-        else:
-            proxy_auth, proxy_addr = None, None
+        proxy_auth, proxy_addr = proxy_manager.get_proxy() if proxy_manager else (None, None)
 
         try:
             sock = make_http_socket(
@@ -76,7 +71,6 @@ def group_scanner(log_queue, count_queue, proxy_manager, timeout, gid_ranges, ch
                 if owner_status[gid]:
                     continue
 
-                # No owner – fetch details
                 sock.send(
                     b"GET /v1/groups/" + gid + b" HTTP/1.1\r\n"
                     b"Host: groups.roblox.com\r\n"
@@ -109,12 +103,10 @@ def group_scanner(log_queue, count_queue, proxy_manager, timeout, gid_ranges, ch
 
                 tracked.add(gid)
 
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Scanner] Error: {e}")
         finally:
             shutdown_socket(sock)
 
-        # Update scanned count
         count_queue.put(chunk_size)
-        # Small delay to avoid CPU overload
-        time.sleep(0.02)
+        time.sleep(0.02)  # avoid CPU spikes
