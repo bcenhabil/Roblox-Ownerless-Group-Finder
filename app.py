@@ -28,8 +28,8 @@ def load_webhook():
             with open('config.json', 'r') as f:
                 config = json.load(f)
                 webhook_url = config.get('webhook_url', '')
-        except:
-            pass
+        except Exception as e:
+            print(f"[ERROR] Could not read config.json: {e}")
     return webhook_url
 
 def start_scanner():
@@ -38,6 +38,7 @@ def start_scanner():
     if not webhook_url:
         print("[ERROR] WEBHOOK_URL environment variable or config.json is required")
         stats['status'] = 'Error: No webhook'
+        # Keep the app running – don't exit
         return
 
     print("[INFO] Webhook URL loaded, starting scanner...")
@@ -61,20 +62,25 @@ def start_scanner():
                 if len(stats['recent']) > 50:
                     stats['recent'] = stats['recent'][:50]
                 print(f"[FOUND] {group_info['name']} (ID: {group_info['id']})")
-            except:
+            except Exception as e:
+                print(f"[log_worker] Error: {e}")
                 time.sleep(0.1)
 
     threading.Thread(target=log_worker, daemon=True).start()
 
     # Proxy manager
-    proxy_manager = ProxyManager()
+    try:
+        proxy_manager = ProxyManager()
+        print("[INFO] ProxyManager initialized")
+    except Exception as e:
+        print(f"[ERROR] ProxyManager failed: {e}")
+        proxy_manager = None
 
-    # Scanner – now uses ALL DEFAULT_RANGES
+    # Scanner – uses ALL DEFAULT_RANGES
     def scanner_worker():
         try:
             stats['status'] = 'Starting...'
             print("[INFO] Scanner thread started")
-            # Use all default ranges
             ranges = DEFAULT_RANGES
             print(f"[INFO] Scanning ranges: {ranges}")
             stats['status'] = 'Scanning'
@@ -82,6 +88,8 @@ def start_scanner():
             stats['status'] = 'Stopped'
         except Exception as e:
             print(f"[ERROR] Scanner crashed: {e}")
+            import traceback
+            traceback.print_exc()
             stats['status'] = f'Error: {str(e)[:50]}'
 
     threading.Thread(target=scanner_worker, daemon=True).start()
@@ -123,7 +131,6 @@ def dashboard():
                 table { width: 100%; border-collapse: collapse; margin-top: 20px; }
                 th, td { padding: 12px; text-align: left; border-bottom: 1px solid #333; }
                 th { background: #0f3460; }
-                .badge { background: #2e7d32; padding: 2px 10px; border-radius: 12px; font-size: 0.8em; }
             </style>
         </head>
         <body>
