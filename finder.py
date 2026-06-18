@@ -15,6 +15,11 @@ def load_config():
     except:
         return {}
 
+def worker(log_queue, count_queue, use_proxy, timeout, ranges, threads):
+    """Wrapper that creates a ProxyManager inside each process."""
+    proxy_manager = ProxyManager() if use_proxy else None
+    group_scanner(log_queue, count_queue, proxy_manager, timeout, ranges, threads)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--workers', type=int, help='Number of processes')
@@ -33,8 +38,7 @@ def main():
     workers = args.workers or config.get('workers', 4)
     threads = args.threads or config.get('threads', 50)
     ranges = config.get('scan_ranges', DEFAULT_RANGES)
-
-    proxy_manager = None if args.no_proxy else ProxyManager()
+    use_proxy = not args.no_proxy
 
     log_queue = mp.Queue()
     count_queue = mp.Queue()
@@ -48,8 +52,8 @@ def main():
     procs = []
     for _ in range(workers):
         p = mp.Process(
-            target=group_scanner,
-            args=(log_queue, count_queue, proxy_manager, 10, ranges, threads)
+            target=worker,
+            args=(log_queue, count_queue, use_proxy, 10, ranges, threads)
         )
         p.daemon = True
         p.start()
